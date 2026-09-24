@@ -12,9 +12,11 @@ import {
   Loader2,
   Copy,
   Check,
-  Share2
+  Share2,
+  Send
 } from 'lucide-react';
 import type { SubmissionResult } from '../types';
+import { appendRegistrationViaWebhook } from '../services/googleSheets';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -65,13 +67,25 @@ export function AdminModal({
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedAttendee, setCopiedAttendee] = useState(false);
   const [copiedAdmin, setCopiedAdmin] = useState(false);
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [testWebhookResult, setTestWebhookResult] = useState<string | null>(null);
 
   const APPS_SCRIPT_CODE = `function doPost(e) {
   try {
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    var data = JSON.parse(e.postData.contents);
+    var data = {};
 
-    // Asegurar encabezados si la hoja está vacía
+    if (e && e.postData && e.postData.contents) {
+      try {
+        data = JSON.parse(e.postData.contents);
+      } catch (err) {
+        data = e.parameter || {};
+      }
+    } else if (e && e.parameter) {
+      data = e.parameter;
+    }
+
+    // 1. Si la hoja no tiene encabezados, crearlos exactamente en orden de 8 columnas
     if (sheet.getLastRow() === 0) {
       sheet.appendRow([
         'Marca Temporal',
@@ -85,61 +99,37 @@ export function AdminModal({
       ]);
     }
 
+    // 2. Extraer datos limpios
     var time = data.marcaTemporal || data.fecha || Utilities.formatDate(new Date(), "GMT-5", "MM/dd/yyyy, hh:mm:ss a");
     var fullName = (data.nombreCompleto || '').trim();
     var parts = fullName.split(/\\s+/);
-    var firstName = data.nombre || parts[0] || '';
-    var lastName = data.apellido || parts.slice(1).join(' ') || '';
+    var firstName = (data.nombre || parts[0] || '').trim();
+    var lastName = (data.apellido || parts.slice(1).join(' ') || '').trim();
     var progs = Array.isArray(data.programas) ? data.programas.join(', ') : (data.programasTexto || data.programas || '');
-    var email = data.correo || '';
-    var phone = data.celular || '';
+    var email = (data.correo || '').trim();
+    var phone = (data.celular || '').trim();
     var notifAsp = data.notificacionAspirante || 'Enviada';
     var notifAdm = data.notificacionAdmin || 'Enviada';
 
-    // Leer encabezados existentes en la Fila 1 para mapeo exacto de columnas
-    var lastCol = Math.max(sheet.getLastColumn(), 1);
-    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-
-    if (headers && headers.length > 1) {
-      var row = [];
-      for (var i = 0; i < headers.length; i++) {
-        var h = String(headers[i]).toLowerCase().trim();
-        if (h.indexOf('temporal') !== -1 || h.indexOf('fecha') !== -1) {
-          row.push(time);
-        } else if (h === 'nombre' || h.indexOf('primer nombre') !== -1) {
-          row.push(firstName);
-        } else if (h === 'apellido' || h.indexOf('apellidos') !== -1) {
-          row.push(lastName);
-        } else if (h.indexOf('nombre completo') !== -1 || h.indexOf('nombre y apellido') !== -1) {
-          row.push(fullName || (firstName + ' ' + lastName).trim());
-        } else if (h.indexOf('programa') !== -1 || h.indexOf('interés') !== -1 || h.indexOf('interes') !== -1 || h.indexOf('carrera') !== -1) {
-          row.push(progs);
-        } else if (h.indexOf('correo') !== -1 || h.indexOf('email') !== -1) {
-          row.push(email);
-        } else if (h.indexOf('celular') !== -1 || h.indexOf('tel') !== -1 || h.indexOf('movil') !== -1 || h.indexOf('móvil') !== -1) {
-          row.push(phone);
-        } else if (h.indexOf('aspirante') !== -1) {
-          row.push(notifAsp);
-        } else if (h.indexOf('admin') !== -1) {
-          row.push(notifAdm);
-        } else {
-          row.push('');
-        }
-      }
-      sheet.appendRow(row);
-    } else {
-      // Orden estándar de 8 columnas exactas
-      sheet.appendRow([
-        time,
-        firstName,
-        lastName,
-        progs,
-        email,
-        phone,
-        notifAsp,
-        notifAdm
-      ]);
-    }
+    // 3. Insertar exactamente las 8 columnas en el orden de tu Google Sheet:
+    // Col A: Marca Temporal
+    // Col B: Nombre
+    // Col C: Apellido
+    // Col D: Programas de Interés
+    // Col E: Correo Electrónico
+    // Col F: Celular
+    // Col G: Notificación Aspirante
+    // Col H: Notificación Admin
+    sheet.appendRow([
+      time,
+      firstName,
+      lastName,
+      progs,
+      email,
+      phone,
+      notifAsp,
+      notifAdm
+    ]);
 
     return ContentService.createTextOutput(JSON.stringify({ result: 'success' }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -147,7 +137,37 @@ export function AdminModal({
     return ContentService.createTextOutput(JSON.stringify({ result: 'error', error: err.toString() }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+function doGet(e) {
+  return doPost(e);
 }`;
+
+  const handleTestWebhook = async () => {
+    if (!webhookInput || !webhookInput.trim()) return;
+    setIsTestingWebhook(true);
+    setTestWebhookResult(null);
+    try {
+      const res = await appendRegistrationViaWebhook(webhookInput.trim(), {
+        nombreCompleto: 'Prueba QLU',
+        nombre: 'Prueba',
+        apellido: 'QLU',
+        programas: ['Maestría', 'Cursos'],
+        correo: 'prueba@qlu.ac.pa',
+        celular: '60000000'
+      });
+      if (res.success) {
+        setTestWebhookResult('✓ Fila de prueba enviada con éxito. Abre tu Google Sheet y confirma que "Prueba" aparezca en Columna B y "QLU" en Columna C.');
+      } else {
+        setTestWebhookResult(`Error al enviar prueba: ${res.error}`);
+      }
+    } catch (e: unknown) {
+      const msg = (e as { message?: string })?.message || 'Error de conexión';
+      setTestWebhookResult(`Error: ${msg}`);
+    } finally {
+      setIsTestingWebhook(false);
+    }
+  };
 
   const handleCopyScript = async () => {
     try {
@@ -403,11 +423,35 @@ export function AdminModal({
                 />
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-xs active:scale-95"
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-xs active:scale-95 shrink-0"
                 >
                   Guardar
                 </button>
               </div>
+
+              {webhookInput && (
+                <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    disabled={isTestingWebhook}
+                    onClick={handleTestWebhook}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{isTestingWebhook ? 'Enviando prueba...' : 'Enviar Fila de Prueba a Google Sheets'}</span>
+                  </button>
+                  <span className="text-[11px] text-slate-500">
+                    Inserta una fila de prueba inmediata para verificar columnas.
+                  </span>
+                </div>
+              )}
+
+              {testWebhookResult && (
+                <div className={`p-2.5 rounded-lg text-xs font-semibold ${testWebhookResult.startsWith('✓') ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+                  {testWebhookResult}
+                </div>
+              )}
+
               {savedWebhookSuccess && (
                 <p className="text-[11px] text-emerald-700 font-medium">
                   ✓ URL de sincronización directa guardada con éxito.
@@ -419,7 +463,7 @@ export function AdminModal({
             {showScriptGuide && (
               <div className="bg-white border border-blue-200 rounded-xl p-4 text-xs text-slate-700 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h5 className="font-bold text-slate-900">Pasos rápidos para conectar tu Google Sheet:</h5>
+                  <h5 className="font-bold text-slate-900">Pasos para conectar tu Google Sheet:</h5>
                   <button
                     type="button"
                     onClick={handleCopyScript}
@@ -432,9 +476,19 @@ export function AdminModal({
                 <ol className="list-decimal list-inside space-y-1.5 text-slate-600">
                   <li>Abre tu hoja de Google Sheets y en el menú superior ve a <strong>Extensiones &gt; Apps Script</strong>.</li>
                   <li>Borra cualquier código previo, haz clic arriba en <strong>«Copiar Código de Google Apps Script»</strong> y pégalo ahí.</li>
-                  <li>Haz clic en el botón azul <strong>Implementar &gt; Nueva implementación</strong>.</li>
-                  <li>En el engranaje selecciona <strong>«Aplicación web»</strong>, en <em>Quién tiene acceso</em> elige <strong>«Cualquier usuario» (Anyone)</strong> y pulsa Implementar.</li>
-                  <li>Copia la <strong>URL de la aplicación web</strong> (termina en <code>/exec</code>) y pégala en el campo de arriba.</li>
+                  <li>
+                    <strong className="text-amber-900 bg-amber-100 px-1 py-0.5 rounded">¡MUY IMPORTANTE SI YA LO HABÍAS IMPLEMENTADO!:</strong>
+                    <br />
+                    En Google Apps Script, guardar con Ctrl+S no actualiza la URL existente. Debes hacer:
+                    <ul className="list-disc list-inside ml-3 mt-1 space-y-0.5 text-slate-700">
+                      <li>Haz clic en <strong>Implementar &gt; Administrar implementaciones</strong>.</li>
+                      <li>Haz clic en el <strong>icono de lápiz (Editar)</strong> en la esquina superior derecha.</li>
+                      <li>En <strong>Versión</strong>, haz clic y selecciona <strong>«Nueva versión»</strong>.</li>
+                      <li>Haz clic en el botón azul <strong>Implementar</strong>.</li>
+                    </ul>
+                    <em>(O simplemente haz clic en <strong>Implementar &gt; Nueva implementación</strong>, selecciona Aplicación web, acceso «Cualquier usuario» y copia la nueva URL).</em>
+                  </li>
+                  <li>Pega la <strong>URL de la aplicación web</strong> (termina en <code>/exec</code>) en el campo de arriba y pulsa Guardar.</li>
                 </ol>
               </div>
             )}

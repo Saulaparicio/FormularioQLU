@@ -248,51 +248,25 @@ export async function appendRegistrationToSheet(
     second: '2-digit'
   });
 
-  // Check existing header format to support both new 7-col and legacy 8-col sheets
-  let isLegacy8Columns = false;
-  try {
-    const headerCheckRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(tabName)}!A1:D1`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    if (headerCheckRes.ok) {
-      const hData = await headerCheckRes.json();
-      if (hData.values && hData.values[0] && String(hData.values[0][2] || '').toLowerCase().includes('apellido')) {
-        isLegacy8Columns = true;
-      }
-    }
-  } catch {
-    // default to new format
-  }
-
   const fullName = (registration.nombreCompleto || `${registration.nombre || ''} ${registration.apellido || ''}`.trim()).trim();
   const nameParts = fullName.split(/\s+/);
   const firstName = registration.nombre?.trim() || nameParts[0] || '';
   const lastName = registration.apellido?.trim() || nameParts.slice(1).join(' ') || '';
 
-  const row = isLegacy8Columns
-    ? [
-        timestamp,
-        firstName,
-        lastName,
-        registration.programas.join(', '),
-        registration.correo.trim().toLowerCase(),
-        registration.celular.trim(),
-        userNotified ? 'Comprobación enviada' : 'No enviada',
-        adminNotified ? 'Admin notificado' : 'Pendiente'
-      ]
-    : [
-        timestamp,
-        fullName,
-        registration.programas.join(', '),
-        registration.correo.trim().toLowerCase(),
-        registration.celular.trim(),
-        userNotified ? 'Comprobación enviada' : 'No enviada',
-        adminNotified ? 'Admin notificado' : 'Pendiente'
-      ];
+  // Always write the exact 8 columns corresponding to the Google Sheet
+  // A: Marca Temporal | B: Nombre | C: Apellido | D: Programas de Interés | E: Correo Electrónico | F: Celular | G: Notificación Aspirante | H: Notificación Admin
+  const row = [
+    timestamp,
+    firstName,
+    lastName,
+    registration.programas.join(', '),
+    registration.correo.trim().toLowerCase(),
+    registration.celular.trim(),
+    userNotified ? 'Comprobación enviada' : 'Enviada',
+    adminNotified ? 'Admin notificado' : 'Enviada'
+  ];
 
-  const colEnd = isLegacy8Columns ? 'H' : 'G';
-  const appendRange = `${encodeURIComponent(tabName)}!A:${colEnd}:append?valueInputOption=USER_ENTERED`;
+  const appendRange = `${encodeURIComponent(tabName)}!A:H:append?valueInputOption=USER_ENTERED`;
   const appendRes = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${appendRange}`,
     {
