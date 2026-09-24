@@ -27,24 +27,41 @@ provider.setCustomParameters({
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 
-// Wipe any legacy token from localStorage to prevent stale 401 credential errors
-if (typeof window !== 'undefined') {
-  try {
-    localStorage.removeItem('feria_qlu_access_token');
-  } catch {
-    // ignore
+const TOKEN_KEY = 'feria_qlu_active_token';
+const TOKEN_EXP_KEY = 'feria_qlu_token_expires';
+
+export const setCachedAccessToken = (token: string | null) => {
+  cachedAccessToken = token;
+  if (typeof window !== 'undefined') {
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+      localStorage.setItem(TOKEN_EXP_KEY, String(Date.now() + 55 * 60 * 1000));
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(TOKEN_EXP_KEY);
+    }
   }
-}
+};
 
 export const clearCachedAccessToken = () => {
-  cachedAccessToken = null;
+  setCachedAccessToken(null);
+};
+
+export const getStoredAccessToken = (): string | null => {
+  if (cachedAccessToken) return cachedAccessToken;
   if (typeof window !== 'undefined') {
     try {
-      localStorage.removeItem('feria_qlu_access_token');
+      const token = localStorage.getItem(TOKEN_KEY);
+      const exp = localStorage.getItem(TOKEN_EXP_KEY);
+      if (token && exp && Date.now() < parseInt(exp, 10)) {
+        cachedAccessToken = token;
+        return token;
+      }
     } catch {
       // ignore
     }
   }
+  return null;
 };
 
 // Initialize auth state listener
@@ -53,9 +70,10 @@ export const initAuth = (
   onAuthFailure?: () => void
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
-    if (user && cachedAccessToken) {
-      if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-    } else if (!isSigningIn) {
+    const token = getStoredAccessToken();
+    if (user && token) {
+      if (onAuthSuccess) onAuthSuccess(user, token);
+    } else if (!user && !token && !isSigningIn) {
       cachedAccessToken = null;
       if (onAuthFailure) onAuthFailure();
     }
@@ -71,8 +89,8 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       throw new Error('No se pudo obtener el token de acceso de Google');
     }
 
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
+    setCachedAccessToken(credential.accessToken);
+    return { user: result.user, accessToken: credential.accessToken };
   } catch (error: unknown) {
     const err = error as { code?: string; message?: string };
     if (
@@ -95,11 +113,11 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken;
+  return getStoredAccessToken();
 };
 
 export const setAccessToken = (token: string | null) => {
-  cachedAccessToken = token;
+  setCachedAccessToken(token);
 };
 
 export const logout = async () => {

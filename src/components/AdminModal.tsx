@@ -193,7 +193,20 @@ function doGet(e) {
     return `${window.location.origin}${window.location.pathname}`;
   };
 
-  const attendeeUrl = `${getBaseUrl()}?modo=aspirante`;
+  const getAttendeeUrl = () => {
+    const base = getBaseUrl();
+    const params = new URLSearchParams();
+    params.set('modo', 'aspirante');
+    if (sheetWebhookUrl) {
+      params.set('hook', sheetWebhookUrl);
+    }
+    if (sheetUrl) {
+      params.set('sheet', sheetUrl);
+    }
+    return `${base}?${params.toString()}`;
+  };
+
+  const attendeeUrl = getAttendeeUrl();
   const adminUrl = `${getBaseUrl()}?modo=admin`;
 
   const copyToClipboard = async (text: string, type: 'attendee' | 'admin') => {

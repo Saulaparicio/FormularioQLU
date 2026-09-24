@@ -82,12 +82,34 @@ export default function App() {
     showToast(url ? '✓ URL de Google Sheets directa guardada' : 'URL de Google Sheets removida');
   };
 
+  // Auto-inherit webhook & sheet config from URL parameters (useful for kiosks, QR codes, tablets)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const hookParam = params.get('hook') || params.get('webhook') || params.get('sheet_hook');
+      if (hookParam) {
+        const decoded = decodeURIComponent(hookParam);
+        setSheetWebhookUrl(decoded);
+        localStorage.setItem('feria_qlu_webhook_url', decoded);
+      }
+      const sheetParam = params.get('sheet') || params.get('sheet_url');
+      if (sheetParam) {
+        const decoded = decodeURIComponent(sheetParam);
+        setSheetUrl(decoded);
+        localStorage.setItem('feria_qlu_sheet_url', decoded);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Auto-sync pending registrations on mount if webhook is configured
   useEffect(() => {
     if (sheetWebhookUrl) {
       syncPendingQueue();
     }
-  }, []);
+  }, [sheetWebhookUrl]);
   const [history, setHistory] = useState<SubmissionResult[]>(() => {
     try {
       const saved = localStorage.getItem('feria_qlu_history');
@@ -232,6 +254,11 @@ export default function App() {
         return;
       }
 
+      let effectiveToken = token;
+      if (!effectiveToken) {
+        effectiveToken = (await getAccessToken()) || undefined;
+      }
+
       let updatedCount = 0;
       let lastErrorMessage = '';
       let activeSheetUrl = targetSheetUrl || sheetUrl;
@@ -262,9 +289,12 @@ export default function App() {
             } catch (err: unknown) {
               lastErrorMessage = (err as { message?: string })?.message || 'Error de conexión';
             }
-          } else if (token) {
+          }
+
+          // 2. Google OAuth fallback if available
+          if (!itemSynced && effectiveToken) {
             try {
-              const sheetRes = await appendRegistrationToSheet(token, regPayload, true, true);
+              const sheetRes = await appendRegistrationToSheet(effectiveToken, regPayload, true, true);
               if (sheetRes.success) {
                 itemSynced = true;
                 if (!activeSheetUrl && sheetRes.spreadsheetUrl) {
@@ -305,7 +335,7 @@ export default function App() {
         showToast(`✓ Sincronizados ${updatedCount} registro(s) a Google Sheets «Feria QLU».`);
       } else if (lastErrorMessage) {
         showToast(`No se pudo sincronizar: ${lastErrorMessage}`);
-      } else if (!sheetWebhookUrl && !token) {
+      } else if (!sheetWebhookUrl && !effectiveToken) {
         showToast('Configura la URL de Google Sheets en Configuración para sincronizar.');
       }
     } catch (e) {
@@ -518,8 +548,10 @@ export default function App() {
       } catch (directErr) {
         console.warn('Direct sync notice:', directErr);
       }
-    } else if (token) {
-      // 1. Google Sheets "Feria QLU" via OAuth fallback
+    }
+
+    // 2. Google Sheets "Feria QLU" via OAuth fallback if not yet saved
+    if (!sheetsSuccess && token) {
       try {
         const sheetRes = await appendRegistrationToSheet(token, formData, true, true);
         sheetsSuccess = sheetRes.success;
