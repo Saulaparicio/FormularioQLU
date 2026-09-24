@@ -26,6 +26,8 @@ interface AdminModalProps {
   adminEmail: string;
   onSaveAdminEmail: (email: string) => void;
   sheetUrl?: string | null;
+  sheetWebhookUrl?: string;
+  onSaveSheetWebhookUrl?: (url: string) => void;
   history: SubmissionResult[];
   onSyncPending?: () => void;
   isSyncing?: boolean;
@@ -44,6 +46,8 @@ export function AdminModal({
   adminEmail,
   onSaveAdminEmail,
   sheetUrl,
+  sheetWebhookUrl,
+  onSaveSheetWebhookUrl,
   history,
   onSyncPending,
   isSyncing,
@@ -53,10 +57,61 @@ export function AdminModal({
 }: AdminModalProps) {
   const [emailInput, setEmailInput] = useState(adminEmail);
   const [savedSuccess, setSavedSuccess] = useState(false);
-  const [sheetInput, setSheetInput] = useState('');
+  const [sheetInput, setSheetInput] = useState(sheetUrl || '');
   const [savedSheetSuccess, setSavedSheetSuccess] = useState(false);
+  const [webhookInput, setWebhookInput] = useState(sheetWebhookUrl || '');
+  const [savedWebhookSuccess, setSavedWebhookSuccess] = useState(false);
+  const [showScriptGuide, setShowScriptGuide] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
   const [copiedAttendee, setCopiedAttendee] = useState(false);
   const [copiedAdmin, setCopiedAdmin] = useState(false);
+
+  const APPS_SCRIPT_CODE = `function doPost(e) {
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    var data = JSON.parse(e.postData.contents);
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        'Marca Temporal',
+        'Nombre Completo',
+        'Programas de Interés',
+        'Correo Electrónico',
+        'Celular'
+      ]);
+    }
+    sheet.appendRow([
+      data.marcaTemporal || new Date().toLocaleString('es-PA', { timeZone: 'America/Panama' }),
+      data.nombreCompleto || (data.nombre + ' ' + data.apellido),
+      Array.isArray(data.programas) ? data.programas.join(', ') : data.programas,
+      data.correo,
+      data.celular
+    ]);
+    return ContentService.createTextOutput(JSON.stringify({ result: 'success' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ result: 'error', error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+
+  const handleCopyScript = async () => {
+    try {
+      await navigator.clipboard.writeText(APPS_SCRIPT_CODE);
+      setCopiedScript(true);
+      setTimeout(() => setCopiedScript(false), 2500);
+    } catch {
+      // fallback
+    }
+  };
+
+  const handleSaveWebhook = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (onSaveSheetWebhookUrl) {
+      onSaveSheetWebhookUrl(webhookInput.trim());
+      setSavedWebhookSuccess(true);
+      setTimeout(() => setSavedWebhookSuccess(false), 3000);
+    }
+  };
 
   const getBaseUrl = () => {
     if (typeof window === 'undefined') return '';
@@ -241,117 +296,133 @@ export function AdminModal({
             </div>
           </div>
 
-          {/* Google Account Section */}
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Cuenta de Google Conectada
-              </span>
-              {user && accessToken ? (
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                  Activa
+          {/* Direct Google Sheets Sync Section (No Google Account Required) */}
+          <div className="bg-emerald-50/70 border border-emerald-300/80 rounded-2xl p-5 space-y-4 shadow-xs">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">Google Sheets Directo (Sin Iniciar Sesión)</h4>
+                  <p className="text-xs text-slate-600">
+                    Inserta las respuestas directamente en tu hoja de cálculo sin requerir que el administrador conecte cuentas.
+                  </p>
+                </div>
+              </div>
+              {sheetWebhookUrl ? (
+                <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
+                  Directo Activo
                 </span>
               ) : (
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
-                  No Conectada
+                <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
+                  Configuración Lista
                 </span>
               )}
             </div>
 
-            {user && accessToken ? (
-              <>
-                <p className="text-sm font-bold text-slate-900">{user?.displayName || 'Administrador'}</p>
-                <p className="text-xs text-slate-500">{user?.email}</p>
-
-                <div className="mt-3 pt-3 border-t border-slate-200 flex items-center justify-between">
-                  <span className="text-xs text-slate-500">Permisos: Sheets, Drive y Gmail</span>
-                  <button
-                    onClick={onLogout}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 hover:text-red-700 cursor-pointer"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>Desconectar</span>
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div className="mt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                <p className="text-xs text-slate-600">
-                  Para guardar registros en Google Sheets «Feria QLU» y enviar correos, conecta tu cuenta de Google.
+            {/* 1. Direct Webhook URL input */}
+            <form onSubmit={handleSaveWebhook} className="bg-white border border-emerald-200 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-900">
+                  URL de Envío Directo (Google Apps Script Web App)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowScriptGuide(!showScriptGuide)}
+                  className="text-[11px] font-bold text-blue-700 hover:text-blue-900 underline cursor-pointer"
+                >
+                  {showScriptGuide ? 'Ocultar guía' : '¿Cómo obtener esta URL en 1 minuto?'}
+                </button>
+              </div>
+              <p className="text-xs text-slate-500">
+                Pega la URL de tu Web App de Google Sheets para que los registros se sincronicen en tiempo real de forma automática.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={webhookInput}
+                  onChange={(e) => setWebhookInput(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  className="flex-1 px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500 font-mono"
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-xs active:scale-95"
+                >
+                  Guardar
+                </button>
+              </div>
+              {savedWebhookSuccess && (
+                <p className="text-[11px] text-emerald-700 font-medium">
+                  ✓ URL de sincronización directa guardada con éxito.
                 </p>
-                {onLogin && (
+              )}
+            </form>
+
+            {/* 2. Expandable guide for 1-minute Apps Script setup */}
+            {showScriptGuide && (
+              <div className="bg-white border border-blue-200 rounded-xl p-4 text-xs text-slate-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h5 className="font-bold text-slate-900">Pasos rápidos para conectar tu Google Sheet:</h5>
                   <button
                     type="button"
-                    onClick={onLogin}
-                    className="px-3.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs rounded-lg transition-all cursor-pointer shrink-0 shadow-xs"
+                    onClick={handleCopyScript}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs rounded-md cursor-pointer transition-all shadow-xs"
                   >
-                    Conectar Google
+                    {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-900 stroke-[3]" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedScript ? '¡Código Copiado!' : 'Copiar Código de Google Apps Script'}</span>
                   </button>
-                )}
+                </div>
+                <ol className="list-decimal list-inside space-y-1.5 text-slate-600">
+                  <li>Abre tu hoja de Google Sheets y en el menú superior ve a <strong>Extensiones &gt; Apps Script</strong>.</li>
+                  <li>Borra cualquier código previo, haz clic arriba en <strong>«Copiar Código de Google Apps Script»</strong> y pégalo ahí.</li>
+                  <li>Haz clic en el botón azul <strong>Implementar &gt; Nueva implementación</strong>.</li>
+                  <li>En el engranaje selecciona <strong>«Aplicación web»</strong>, en <em>Quién tiene acceso</em> elige <strong>«Cualquier usuario» (Anyone)</strong> y pulsa Implementar.</li>
+                  <li>Copia la <strong>URL de la aplicación web</strong> (termina en <code>/exec</code>) y pégala en el campo de arriba.</li>
+                </ol>
               </div>
             )}
-          </div>
 
-          {/* Google Sheets Link */}
-          <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-4">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-                <FileSpreadsheet className="w-5 h-5" />
+            {/* 3. Sheet URL input for quick opening */}
+            <form onSubmit={handleSaveSheet} className="bg-white border border-emerald-200 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-900">
+                  Enlace directo a tu Google Sheet (para visualización)
+                </label>
+                {sheetUrl && (
+                  <a
+                    href={sheetUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 underline"
+                  >
+                    <span>Abrir hoja en Google Sheets</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
               </div>
-              <div className="flex-1">
-                <h4 className="text-sm font-bold text-slate-900">Hoja de Cálculo «Feria QLU»</h4>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  Los registros de cada aspirante se insertan automáticamente en esta hoja con fecha, nombre, apellido, programas y contactos.
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={sheetInput}
+                  onChange={(e) => setSheetInput(e.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/.../edit"
+                  className="flex-1 px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500 font-mono"
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-xs active:scale-95"
+                >
+                  Guardar
+                </button>
+              </div>
+              {savedSheetSuccess && (
+                <p className="text-[11px] text-emerald-700 font-medium">
+                  ✓ Enlace de Google Sheets guardado.
                 </p>
-
-                {sheetUrl ? (
-                  <div className="mt-2.5 flex items-center gap-2">
-                    <a
-                      href={sheetUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-800 bg-white px-3 py-1.5 rounded-lg border border-emerald-300 hover:bg-emerald-50 transition-all shadow-2xs"
-                    >
-                      <span>Abrir en Google Sheets</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-400 mt-2 italic">
-                    Se creará y vinculará automáticamente al registrar aspirantes con Google conectado.
-                  </p>
-                )}
-
-                {/* Form to link existing spreadsheet */}
-                {onSaveCustomSheet && (
-                  <form onSubmit={handleSaveSheet} className="mt-3 pt-3 border-t border-emerald-200/80">
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-emerald-900 mb-1">
-                      Vincular Hoja Existente (URL o ID)
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={sheetInput}
-                        onChange={(e) => setSheetInput(e.target.value)}
-                        placeholder="https://docs.google.com/spreadsheets/d/... o ID"
-                        className="flex-1 px-2.5 py-1 text-xs bg-white border border-emerald-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500 font-mono"
-                      />
-                      <button
-                        type="submit"
-                        className="px-3.5 py-1 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs rounded-lg transition-all cursor-pointer shadow-xs"
-                      >
-                        Vincular
-                      </button>
-                    </div>
-                    {savedSheetSuccess && (
-                      <p className="text-[11px] text-emerald-700 font-medium mt-1">
-                        ✓ Hoja de cálculo vinculada correctamente.
-                      </p>
-                    )}
-                  </form>
-                )}
-              </div>
-            </div>
+              )}
+            </form>
           </div>
 
           {/* Admin Email Notification Config */}

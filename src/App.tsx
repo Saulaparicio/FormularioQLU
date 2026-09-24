@@ -13,6 +13,7 @@ import {
 } from './services/firebaseAuth';
 import {
   appendRegistrationToSheet,
+  appendRegistrationViaWebhook,
   getOrCreateFeriaQLUSheet,
   extractSpreadsheetId
 } from './services/googleSheets';
@@ -62,7 +63,20 @@ export default function App() {
   const [sheetUrl, setSheetUrl] = useState<string | null>(() => {
     return localStorage.getItem('feria_qlu_sheet_url') || null;
   });
+  const [sheetWebhookUrl, setSheetWebhookUrl] = useState<string>(() => {
+    return localStorage.getItem('feria_qlu_webhook_url') || '';
+  });
   const [isAdminOpen, setIsAdminOpen] = useState(false);
+
+  const handleSaveSheetWebhookUrl = (url: string) => {
+    setSheetWebhookUrl(url);
+    if (url) {
+      localStorage.setItem('feria_qlu_webhook_url', url);
+    } else {
+      localStorage.removeItem('feria_qlu_webhook_url');
+    }
+    showToast(url ? '✓ URL de Google Sheets directa guardada' : 'URL de Google Sheets removida');
+  };
   const [history, setHistory] = useState<SubmissionResult[]>(() => {
     try {
       const saved = localStorage.getItem('feria_qlu_history');
@@ -193,7 +207,7 @@ export default function App() {
   };
 
   // Sync any registrations submitted prior to Google authentication
-  const syncPendingQueue = async (token: string, targetSheetUrl?: string) => {
+  const syncPendingQueue = async (token?: string, targetSheetUrl?: string) => {
     const raw = localStorage.getItem('feria_qlu_history');
     if (!raw) {
       showToast('No hay registros en el historial local.');
@@ -203,7 +217,7 @@ export default function App() {
       const items: SubmissionResult[] = JSON.parse(raw);
       const pendingItems = items.filter((i) => !i.sheetsSaved);
       if (pendingItems.length === 0) {
-        showToast('Todos los registros ya están sincronizados en Google Sheets.');
+        showToast('Todos los registros ya están sincronizados.');
         return;
       }
 
@@ -213,46 +227,53 @@ export default function App() {
 
       for (const item of items) {
         if (!item.sheetsSaved) {
-          try {
-            const full = item.nombreCompleto || `${item.nombre || ''} ${item.apellido || ''}`.trim();
-            const sheetRes = await appendRegistrationToSheet(
-              token,
-              {
-                nombreCompleto: full,
-                nombre: item.nombre,
-                apellido: item.apellido,
-                programas: item.programas,
-                correo: item.correo,
-                celular: item.celular
-              },
-              true,
-              true
-            );
-            item.sheetsSaved = true;
-            item.sheetsUrl = sheetRes.spreadsheetUrl || activeSheetUrl || undefined;
-            if (!activeSheetUrl && sheetRes.spreadsheetUrl) {
-              activeSheetUrl = sheetRes.spreadsheetUrl;
-              setSheetUrl(activeSheetUrl);
-              localStorage.setItem('feria_qlu_sheet_url', activeSheetUrl);
+          const full = item.nombreCompleto || `${item.nombre || ''} ${item.apellido || ''}`.trim();
+          const regPayload: RegistrationData = {
+            nombreCompleto: full,
+            nombre: item.nombre,
+            apellido: item.apellido,
+            programas: item.programas,
+            correo: item.correo,
+            celular: item.celular
+          };
+
+          let itemSynced = false;
+
+          // 1. Direct Webhook sync (Zero login required!)
+          if (sheetWebhookUrl) {
+            try {
+              const res = await appendRegistrationViaWebhook(sheetWebhookUrl, regPayload);
+              if (res.success) {
+                itemSynced = true;
+              } else {
+                lastErrorMessage = res.error || 'Error al conectar con Google Sheets';
+              }
+            } catch (err: unknown) {
+              lastErrorMessage = (err as { message?: string })?.message || 'Error de conexión';
             }
+          } else if (token) {
+            try {
+              const sheetRes = await appendRegistrationToSheet(token, regPayload, true, true);
+              if (sheetRes.success) {
+                itemSynced = true;
+                if (!activeSheetUrl && sheetRes.spreadsheetUrl) {
+                  activeSheetUrl = sheetRes.spreadsheetUrl;
+                  setSheetUrl(activeSheetUrl);
+                  localStorage.setItem('feria_qlu_sheet_url', activeSheetUrl);
+                }
+              }
+            } catch (syncErr: unknown) {
+              const err = syncErr as { message?: string };
+              lastErrorMessage = err?.message || 'Error al conectar con Google Sheets';
+            }
+          }
+
+          if (itemSynced) {
+            item.sheetsSaved = true;
+            item.sheetsUrl = activeSheetUrl || undefined;
             item.userEmailSent = true;
             item.adminEmailSent = true;
             updatedCount++;
-          } catch (syncErr: unknown) {
-            const err = syncErr as { message?: string };
-            lastErrorMessage = err?.message || 'Error al conectar con Google Sheets';
-            console.error('Error al sincronizar registro pendiente:', syncErr);
-            if (
-              lastErrorMessage.includes('AUTH_EXPIRED') ||
-              lastErrorMessage.includes('401') ||
-              lastErrorMessage.toLowerCase().includes('token') ||
-              lastErrorMessage.toLowerCase().includes('credential') ||
-              lastErrorMessage.toLowerCase().includes('unauthenticated')
-            ) {
-              setAccessToken(null);
-              setUser(null);
-              break;
-            }
           }
         }
       }
@@ -272,17 +293,9 @@ export default function App() {
         });
         showToast(`✓ Sincronizados ${updatedCount} registro(s) a Google Sheets «Feria QLU».`);
       } else if (lastErrorMessage) {
-        if (
-          lastErrorMessage.includes('AUTH_EXPIRED') ||
-          lastErrorMessage.includes('401') ||
-          lastErrorMessage.toLowerCase().includes('token') ||
-          lastErrorMessage.toLowerCase().includes('credential') ||
-          lastErrorMessage.toLowerCase().includes('unauthenticated')
-        ) {
-          showToast('La sesión de Google expiró. Por favor haz clic en «Conectar Google» para renovar el acceso.');
-        } else {
-          showToast(`No se pudo sincronizar: ${lastErrorMessage}`);
-        }
+        showToast(`No se pudo sincronizar: ${lastErrorMessage}`);
+      } else if (!sheetWebhookUrl && !token) {
+        showToast('Configura la URL de Google Sheets en Configuración para sincronizar.');
       }
     } catch (e) {
       console.warn('Error al procesar cola de sincronización:', e);
@@ -295,28 +308,7 @@ export default function App() {
     if (isSyncing) return;
     setIsSyncing(true);
     try {
-      let token = accessToken;
-      if (!token) {
-        token = await getAccessToken();
-      }
-
-      if (!token) {
-        showToast('Iniciando sesión con Google para sincronizar...');
-        const res = await googleSignIn();
-        if (!res) {
-          showToast('Sincronización cancelada: Se requiere conectar Google.');
-          return;
-        }
-        token = res.accessToken;
-        setUser(res.user);
-        setAccessToken(res.accessToken);
-        if (res.user.email) {
-          setAdminEmail(res.user.email);
-          localStorage.setItem('feria_qlu_admin_email', res.user.email);
-        }
-      }
-
-      await syncPendingQueue(token, sheetUrl || undefined);
+      await syncPendingQueue(accessToken || undefined, sheetUrl || undefined);
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message || 'Error desconocido';
       showToast(`Error al sincronizar: ${msg}`);
@@ -500,9 +492,23 @@ export default function App() {
     let userMailSuccess = false;
     let adminMailSuccess = false;
 
-    // Execute Google Workspace integrations if Google account is connected
-    if (token) {
-      // 1. Google Sheets "Feria QLU"
+    // Execute Google Workspace integrations
+    // 1. Direct Webhook sync (Zero login required!)
+    if (sheetWebhookUrl) {
+      try {
+        const directRes = await appendRegistrationViaWebhook(sheetWebhookUrl, formData);
+        if (directRes.success) {
+          sheetsSuccess = true;
+          finalSheetUrl = sheetUrl || null;
+          showToast('✓ Registrado directamente en Google Sheets «Feria QLU»');
+        } else {
+          console.warn('Webhook notice:', directRes.error);
+        }
+      } catch (directErr) {
+        console.warn('Direct sync notice:', directErr);
+      }
+    } else if (token) {
+      // 1. Google Sheets "Feria QLU" via OAuth fallback
       try {
         const sheetRes = await appendRegistrationToSheet(token, formData, true, true);
         sheetsSuccess = sheetRes.success;
@@ -522,39 +528,36 @@ export default function App() {
         ) {
           setAccessToken(null);
           setUser(null);
-          showToast('La sesión de Google expiró. Tu registro se guardó localmente; haz clic en «Conectar Google» para sincronizar.');
-        } else {
-          showToast(`Atención Sheets: ${msg}`);
         }
       }
+    }
 
-      // Only attempt email sending if sheets operation was successful with valid credentials
-      if (sheetsSuccess) {
-        // 2. User Confirmation Email
-        try {
-          userMailSuccess = await sendUserReceipt(
-            token,
-            formData,
-            user?.email || 'admisiones@qlu.ac.pa'
-          );
-        } catch (userMailErr) {
-          console.warn('User email notice:', userMailErr);
-        }
-
-        // 3. Admin Notification Email
-        try {
-          adminMailSuccess = await sendAdminNotification(
-            token,
-            formData,
-            adminEmail,
-            finalSheetUrl || undefined
-          );
-        } catch (adminMailErr) {
-          console.warn('Admin email notice:', adminMailErr);
-        }
+    // Confirmation Emails (if authenticated)
+    if (token && sheetsSuccess) {
+      try {
+        userMailSuccess = await sendUserReceipt(
+          token,
+          formData,
+          user?.email || 'admisiones@qlu.ac.pa'
+        );
+      } catch (userMailErr) {
+        console.warn('User email notice:', userMailErr);
       }
-    } else {
-      showToast('Guardado en cola local. Conecta Google en el botón superior para sincronizar a Google Sheets.');
+
+      try {
+        adminMailSuccess = await sendAdminNotification(
+          token,
+          formData,
+          adminEmail,
+          finalSheetUrl || undefined
+        );
+      } catch (adminMailErr) {
+        console.warn('Admin email notice:', adminMailErr);
+      }
+    }
+
+    if (!sheetsSuccess && !sheetWebhookUrl) {
+      showToast('Registro guardado localmente. Configura la URL de Google Sheets en Configuración.');
     }
 
     const timestamp = new Date().toLocaleString('es-PA', {
@@ -626,23 +629,22 @@ export default function App() {
         isAspiranteMode={isAspiranteMode}
       />
 
-      {/* Top Banner when Google is disconnected (Hidden in Aspirante Mode) */}
-      {!isAspiranteMode && (!user || !accessToken) && (
+      {/* Helper Banner for Admin when Google Sheet Webhook is not configured (Hidden in Aspirante Mode) */}
+      {!isAspiranteMode && !sheetWebhookUrl && (
         <div className="bg-amber-400/10 border-b border-amber-400/25 px-4 py-2 text-xs text-amber-200">
           <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
               <span>
-                Para registrar directamente en la hoja <strong className="text-amber-300 font-bold">Google Sheets «Feria QLU»</strong>, conecta tu cuenta de Google.
+                Para enviar datos directamente a <strong className="text-amber-300 font-bold">Google Sheets</strong> sin que el administrador inicie sesión, vincula tu hoja en Configuración.
               </span>
             </span>
             <button
               type="button"
-              onClick={handleGoogleLogin}
-              disabled={isLoggingIn}
-              className="px-3 py-1 bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold rounded-lg text-xs shrink-0 cursor-pointer shadow-md active:scale-98"
+              onClick={() => setIsAdminOpen(true)}
+              className="px-3.5 py-1 bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold rounded-lg text-xs shrink-0 cursor-pointer shadow-md active:scale-98"
             >
-              {isLoggingIn ? 'Conectando...' : 'Conectar Google'}
+              Configurar Google Sheets
             </button>
           </div>
         </div>
@@ -666,7 +668,7 @@ export default function App() {
             <ConfirmationSlide
               result={submissionResult}
               onReset={handleResetForm}
-              onConnectGoogle={handleGoogleLogin}
+              onSyncNow={handleSyncPending}
               isAspiranteMode={isAspiranteMode}
             />
           ) : (
@@ -779,6 +781,8 @@ export default function App() {
         adminEmail={adminEmail}
         onSaveAdminEmail={handleSaveAdminEmail}
         sheetUrl={sheetUrl}
+        sheetWebhookUrl={sheetWebhookUrl}
+        onSaveSheetWebhookUrl={handleSaveSheetWebhookUrl}
         history={history}
         onSaveCustomSheet={handleSaveCustomSheet}
         isSyncing={isSyncing}

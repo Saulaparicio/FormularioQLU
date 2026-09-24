@@ -325,3 +325,67 @@ export async function appendRegistrationToSheet(
 
   return { success: true, spreadsheetUrl };
 }
+
+/**
+ * Appends registration data directly to Google Sheets via Google Apps Script Webhook.
+ * Requires ZERO Google logins, ZERO OAuth tokens, and has ZERO expiration issues.
+ */
+export async function appendRegistrationViaWebhook(
+  webhookUrl: string,
+  registration: RegistrationData
+): Promise<{ success: boolean; error?: string }> {
+  if (!webhookUrl || !webhookUrl.trim()) {
+    return { success: false, error: 'No se ha configurado la URL de Google Sheets' };
+  }
+
+  const timestamp = new Date().toLocaleString('es-PA', {
+    timeZone: 'America/Panama',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+
+  const full = (registration.nombreCompleto || `${registration.nombre || ''} ${registration.apellido || ''}`).trim();
+  const payload = {
+    marcaTemporal: timestamp,
+    fecha: timestamp,
+    nombreCompleto: full,
+    nombre: registration.nombre || '',
+    apellido: registration.apellido || '',
+    programas: registration.programas,
+    programasTexto: registration.programas.join(', '),
+    correo: registration.correo,
+    celular: registration.celular
+  };
+
+  try {
+    // Send as text/plain to avoid CORS OPTIONS preflight issues with Google Apps Script
+    await fetch(webhookUrl.trim(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify(payload)
+    });
+    return { success: true };
+  } catch (err: unknown) {
+    try {
+      // Fallback with no-cors mode for cross-domain redirects
+      await fetch(webhookUrl.trim(), {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        },
+        body: JSON.stringify(payload)
+      });
+      return { success: true };
+    } catch (fallbackErr: unknown) {
+      const msg = (fallbackErr as { message?: string })?.message || (err as { message?: string })?.message || 'Error al conectar con Google Sheets';
+      return { success: false, error: msg };
+    }
+  }
+}

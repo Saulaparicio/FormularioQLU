@@ -4,14 +4,14 @@ import type { SubmissionResult } from '../../types';
 interface ConfirmationSlideProps {
   result: SubmissionResult;
   onReset: () => void;
-  onConnectGoogle?: () => void;
+  onSyncNow?: () => void;
   isAspiranteMode?: boolean;
 }
 
 export function ConfirmationSlide({
   result,
   onReset,
-  onConnectGoogle,
+  onSyncNow,
   isAspiranteMode = false
 }: ConfirmationSlideProps) {
   return (
@@ -90,12 +90,12 @@ export function ConfirmationSlide({
                 <span>Ver Hoja</span>
                 <ExternalLink className="w-3.5 h-3.5 stroke-[2.5]" />
               </a>
-            ) : !result.sheetsSaved && onConnectGoogle ? (
+            ) : !result.sheetsSaved && onSyncNow ? (
               <button
                 id="btn-sync-sheets-now"
                 type="button"
-                onClick={onConnectGoogle}
-                className="inline-flex items-center gap-1 text-xs font-extrabold text-amber-950 bg-amber-400 hover:bg-amber-300 px-3 py-1.5 rounded-lg transition-all cursor-pointer shadow-xs"
+                onClick={onSyncNow}
+                className="inline-flex items-center gap-1 text-xs font-extrabold text-amber-950 bg-amber-400 hover:bg-amber-300 px-3 py-1.5 rounded-lg transition-all cursor-pointer shadow-xs active:scale-95"
               >
                 <span>Sincronizar</span>
               </button>

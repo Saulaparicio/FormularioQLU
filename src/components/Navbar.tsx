@@ -88,35 +88,23 @@ export function Navbar({
               </a>
             )}
 
-            {user && accessToken ? (
-              <div className="flex items-center gap-2">
-                <div className="hidden md:flex items-center gap-1.5 text-xs font-medium text-blue-100 bg-blue-900/60 border border-blue-700/60 px-2.5 py-1.5 rounded-lg">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="truncate max-w-[140px]">{user.email}</span>
-                </div>
-
-                <button
-                  id="header-btn-admin"
-                  type="button"
-                  onClick={onOpenAdmin}
-                  className="p-2 text-blue-200 hover:text-white hover:bg-blue-800/60 rounded-lg transition-all cursor-pointer border border-blue-700/50"
-                  title="Configuración de Administrador"
-                >
-                  <Settings className="w-5 h-5" />
-                </button>
+            {user && accessToken && (
+              <div className="hidden md:flex items-center gap-1.5 text-xs font-medium text-blue-100 bg-blue-900/60 border border-blue-700/60 px-2.5 py-1.5 rounded-lg">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="truncate max-w-[140px]">{user.email}</span>
               </div>
-            ) : (
-              <button
-                id="header-btn-login"
-                type="button"
-                disabled={isLoggingIn}
-                onClick={onLogin}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-extrabold rounded-lg transition-all shadow-md active:scale-98 cursor-pointer disabled:opacity-50"
-              >
-                <LogIn className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span>{isLoggingIn ? 'Conectando...' : 'Conectar Google'}</span>
-              </button>
             )}
+
+            <button
+              id="header-btn-admin"
+              type="button"
+              onClick={onOpenAdmin}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-blue-100 hover:text-white bg-blue-900/60 hover:bg-blue-800/80 rounded-lg transition-all cursor-pointer border border-blue-700/70 text-xs font-bold shadow-2xs"
+              title="Configuración de Administrador"
+            >
+              <Settings className="w-4 h-4 text-amber-400" />
+              <span>Configuración</span>
+            </button>
           </div>
         )}
       </div>
