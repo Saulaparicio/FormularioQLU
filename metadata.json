@@ -1,0 +1,6 @@
+{
+  "name": "Feria QLU Registro",
+  "description": "Formulario interactivo tipo slide para registro de aspirantes con sincronización a Google Sheets Feria QLU.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
