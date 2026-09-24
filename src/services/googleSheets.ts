@@ -12,7 +12,8 @@ interface EnsureSheetResult {
 
 const HEADERS = [
   'Marca Temporal',
-  'Nombre y Apellido',
+  'Nombre',
+  'Apellido',
   'Programas de Interés',
   'Correo Electrónico',
   'Celular',
@@ -349,16 +350,33 @@ export async function appendRegistrationViaWebhook(
   });
 
   const full = (registration.nombreCompleto || `${registration.nombre || ''} ${registration.apellido || ''}`).trim();
+  const parts = full.split(/\s+/);
+  const firstName = registration.nombre?.trim() || parts[0] || '';
+  const lastName = registration.apellido?.trim() || parts.slice(1).join(' ') || '';
+  const programsStr = Array.isArray(registration.programas) ? registration.programas.join(', ') : (registration.programas || '');
+
   const payload = {
     marcaTemporal: timestamp,
     fecha: timestamp,
+    nombre: firstName,
+    apellido: lastName,
     nombreCompleto: full,
-    nombre: registration.nombre || '',
-    apellido: registration.apellido || '',
     programas: registration.programas,
-    programasTexto: registration.programas.join(', '),
-    correo: registration.correo,
-    celular: registration.celular
+    programasTexto: programsStr,
+    correo: registration.correo ? registration.correo.trim() : '',
+    celular: registration.celular ? registration.celular.trim() : '',
+    notificacionAspirante: 'Enviada',
+    notificacionAdmin: 'Enviada',
+    valores: [
+      timestamp,
+      firstName,
+      lastName,
+      programsStr,
+      registration.correo ? registration.correo.trim() : '',
+      registration.celular ? registration.celular.trim() : '',
+      'Enviada',
+      'Enviada'
+    ]
   };
 
   try {

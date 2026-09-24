@@ -1,4 +1,5 @@
-import { Check, CheckCircle, ExternalLink, Mail, FileSpreadsheet, RotateCcw, ShieldCheck } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Check, CheckCircle, ExternalLink, Mail, FileSpreadsheet, RotateCcw, ShieldCheck, Timer } from 'lucide-react';
 import type { SubmissionResult } from '../../types';
 
 interface ConfirmationSlideProps {
@@ -14,6 +15,19 @@ export function ConfirmationSlide({
   onSyncNow,
   isAspiranteMode = false
 }: ConfirmationSlideProps) {
+  const [secondsLeft, setSecondsLeft] = useState(5);
+
+  // Auto-redirect to initial screen after 5 seconds
+  useEffect(() => {
+    if (secondsLeft <= 0) {
+      onReset();
+      return;
+    }
+    const timer = setInterval(() => {
+      setSecondsLeft((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [secondsLeft, onReset]);
   return (
     <div id="slide-confirmacion" className="flex flex-col items-center text-center max-w-xl mx-auto w-full py-2">
       {/* Big Animated checkmark icon */}
@@ -159,6 +173,21 @@ export function ConfirmationSlide({
         </div>
       </div>
 
+      {/* Auto-return banner */}
+      <div className="w-full bg-blue-900/60 border border-blue-700/60 rounded-xl p-3 mb-4 flex items-center justify-between text-xs text-blue-200">
+        <span className="flex items-center gap-2">
+          <Timer className="w-4 h-4 text-amber-400 animate-spin" />
+          <span>Regresando a la pantalla inicial en <strong className="text-amber-300 font-extrabold text-sm">{secondsLeft}</strong> segundos...</span>
+        </span>
+        <button
+          type="button"
+          onClick={onReset}
+          className="text-[11px] font-bold text-amber-300 hover:text-amber-200 underline cursor-pointer"
+        >
+          Volver ahora
+        </button>
+      </div>
+
       {/* Button to register another person */}
       <button
         id="btn-register-another"
@@ -167,7 +196,7 @@ export function ConfirmationSlide({
         className="inline-flex items-center gap-2 px-8 py-3.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold rounded-xl transition-all shadow-lg hover:shadow-amber-400/20 active:scale-98 cursor-pointer"
       >
         <RotateCcw className="w-4 h-4 stroke-[2.5]" />
-        <span>Registrar a otro aspirante</span>
+        <span>Registrar a otro aspirante ({secondsLeft}s)</span>
       </button>
     </div>
   );

@@ -70,22 +70,77 @@ export function AdminModal({
   try {
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
     var data = JSON.parse(e.postData.contents);
+
+    // Asegurar encabezados si la hoja está vacía
     if (sheet.getLastRow() === 0) {
       sheet.appendRow([
         'Marca Temporal',
-        'Nombre Completo',
+        'Nombre',
+        'Apellido',
         'Programas de Interés',
         'Correo Electrónico',
-        'Celular'
+        'Celular',
+        'Notificación Aspirante',
+        'Notificación Admin'
       ]);
     }
-    sheet.appendRow([
-      data.marcaTemporal || new Date().toLocaleString('es-PA', { timeZone: 'America/Panama' }),
-      data.nombreCompleto || (data.nombre + ' ' + data.apellido),
-      Array.isArray(data.programas) ? data.programas.join(', ') : data.programas,
-      data.correo,
-      data.celular
-    ]);
+
+    var time = data.marcaTemporal || data.fecha || Utilities.formatDate(new Date(), "GMT-5", "MM/dd/yyyy, hh:mm:ss a");
+    var fullName = (data.nombreCompleto || '').trim();
+    var parts = fullName.split(/\\s+/);
+    var firstName = data.nombre || parts[0] || '';
+    var lastName = data.apellido || parts.slice(1).join(' ') || '';
+    var progs = Array.isArray(data.programas) ? data.programas.join(', ') : (data.programasTexto || data.programas || '');
+    var email = data.correo || '';
+    var phone = data.celular || '';
+    var notifAsp = data.notificacionAspirante || 'Enviada';
+    var notifAdm = data.notificacionAdmin || 'Enviada';
+
+    // Leer encabezados existentes en la Fila 1 para mapeo exacto de columnas
+    var lastCol = Math.max(sheet.getLastColumn(), 1);
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+    if (headers && headers.length > 1) {
+      var row = [];
+      for (var i = 0; i < headers.length; i++) {
+        var h = String(headers[i]).toLowerCase().trim();
+        if (h.indexOf('temporal') !== -1 || h.indexOf('fecha') !== -1) {
+          row.push(time);
+        } else if (h === 'nombre' || h.indexOf('primer nombre') !== -1) {
+          row.push(firstName);
+        } else if (h === 'apellido' || h.indexOf('apellidos') !== -1) {
+          row.push(lastName);
+        } else if (h.indexOf('nombre completo') !== -1 || h.indexOf('nombre y apellido') !== -1) {
+          row.push(fullName || (firstName + ' ' + lastName).trim());
+        } else if (h.indexOf('programa') !== -1 || h.indexOf('interés') !== -1 || h.indexOf('interes') !== -1 || h.indexOf('carrera') !== -1) {
+          row.push(progs);
+        } else if (h.indexOf('correo') !== -1 || h.indexOf('email') !== -1) {
+          row.push(email);
+        } else if (h.indexOf('celular') !== -1 || h.indexOf('tel') !== -1 || h.indexOf('movil') !== -1 || h.indexOf('móvil') !== -1) {
+          row.push(phone);
+        } else if (h.indexOf('aspirante') !== -1) {
+          row.push(notifAsp);
+        } else if (h.indexOf('admin') !== -1) {
+          row.push(notifAdm);
+        } else {
+          row.push('');
+        }
+      }
+      sheet.appendRow(row);
+    } else {
+      // Orden estándar de 8 columnas exactas
+      sheet.appendRow([
+        time,
+        firstName,
+        lastName,
+        progs,
+        email,
+        phone,
+        notifAsp,
+        notifAdm
+      ]);
+    }
+
     return ContentService.createTextOutput(JSON.stringify({ result: 'success' }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {

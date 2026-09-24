@@ -72,11 +72,22 @@ export default function App() {
     setSheetWebhookUrl(url);
     if (url) {
       localStorage.setItem('feria_qlu_webhook_url', url);
+      // Auto-sync any pending items immediately
+      setTimeout(() => {
+        syncPendingQueue();
+      }, 300);
     } else {
       localStorage.removeItem('feria_qlu_webhook_url');
     }
     showToast(url ? '✓ URL de Google Sheets directa guardada' : 'URL de Google Sheets removida');
   };
+
+  // Auto-sync pending registrations on mount if webhook is configured
+  useEffect(() => {
+    if (sheetWebhookUrl) {
+      syncPendingQueue();
+    }
+  }, []);
   const [history, setHistory] = useState<SubmissionResult[]>(() => {
     try {
       const saved = localStorage.getItem('feria_qlu_history');
